@@ -46,15 +46,45 @@ int main(int argc, char **argv)
 
 void doit(int fd) 
 {
+  int is_static;
   rio_t rio;
+  struct stat sbuf;
   char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+  char filename[MAXLINE], cgiargs[MAXLINE];
 
   Rio_readinitb(&rio, fd);
   Rio_readlineb(&rio, buf, MAXLINE);
-
+  sscanf(buf, "%s %s %s", method, uri, version);  
   if(strcasecmp(method, "GET")) {
-    clienterror(fd, method, "501", "abc", "abcd");
+    clienterror(fd, method, "501", "Not Implemented", "Tiny does bot implement this method");
     return;
+  }
+  read_requesthdrs(&rio);
+
+  is_static = parse_uri(uri, filename, cgiargs);
+  // 파일이 존재하지 않으면 
+  if(stat(filename, &sbuf) < 0) {
+    clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file");
+    return;
+  }
+  // 정적 파일이라면 
+  if(is_static) {
+    // 일반 파일이 아니거나, 읽기 권한이 없으면
+    if(!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+      clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read this file");
+      return;
+    }
+    // 모든 경우 통과 -> 정적 컨텐츠를 클라이언트에게 전송
+    serve_static(fd, filename, sbuf.st_size);
+  }
+  // 동적 컨텐츠
+  else {
+    // 일반 파일이 아니거나, 실행 권한이 없으면 
+    if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
+      clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
+      return;
+    }
+    serve_dynamic(fd, filename, cgiargs);
   }
 }
 
@@ -134,4 +164,54 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
     strcat(filename, uri);
     return 0;
   }
+}
+
+// get_filetype - 파일 이름에서 MIME 타입 결정
+void get_filetype(char *filename, char *filetype)
+{
+  if(strstr(filename, ".html")) strcpy(filetype, "text/html");
+  else if(strstr(filename, ".gif")) strcpy(filetype, "image/gif");
+  else if(strstr(filename, ".png")) strcpy(filetype, "image/png");
+  else if(strstr(filename, ".jpg")) strcpy(filetype, "image/jpeg");
+  else strcpy(filetype, "text/plain");
+}
+
+// serve_static : 정적 컨텐츠 전송 -> 클라이언트에게로?
+void serve_static(int fd, char *filename, int filesize) 
+{
+  int srcfd;
+  char *srcp, filetype[MAXLINE], buf[MAXBUF];
+
+  get_filetype(filename, filetype);
+  sprintf(buf, "HTTP/1.0 200 OK\r\n");
+  sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
+  sprintf(buf, "%sConnection: close\r\n", buf);
+  sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
+  sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
+  Rio_writen(fd, buf, strlen(buf));
+  printf("Response headers:\n");
+  printf("%s", buf);
+
+  srcfd = Open(filename, O_RDONLY, 0);
+  srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+  Close(srcfd);
+  Rio_writen(fd, srcp, filesize);
+  Munmap(srcp, filesize);
+}
+
+void serve_dynamic(int fd, char *filename, char *cgiargs) 
+{
+  char buf[MAXLINE], *emptylist[] = { NULL };
+
+  sprintf(buf, "HTTP/1.0 200 OK\r\n");
+  Rio_writen(fd, buf, strlen(buf));
+  sprintf(buf, "Server : Tiny Web Server\r\n");
+  Rio_writen(fd, buf, strlen(buf));
+
+  if(Fork() == 0) {
+    setenv("QUERY_STRING", cgiargs, 1);
+    Dup2(fd, STDOUT_FILENO);
+    Execve(filename, emptylist, environ);
+  }
+  Wait(NULL);
 }
