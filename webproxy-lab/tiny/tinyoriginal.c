@@ -8,7 +8,7 @@
  */
 #include "csapp.h"
 
-void doit(int fd); 
+void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
 void serve_static(int fd, char *filename, int filesize);
@@ -54,6 +54,7 @@ void doit(int fd)
 
   Rio_readinitb(&rio, fd);
   Rio_readlineb(&rio, buf, MAXLINE);
+  printf("Request line: %s\n", buf);
   sscanf(buf, "%s %s %s", method, uri, version);  
   if(strcasecmp(method, "GET")) {
     clienterror(fd, method, "501", "Not Implemented", "Tiny does bot implement this method");
@@ -62,6 +63,7 @@ void doit(int fd)
   read_requesthdrs(&rio);
 
   is_static = parse_uri(uri, filename, cgiargs);
+  printf("==> Requested filename: %s\n", filename);
   // 파일이 존재하지 않으면 
   if(stat(filename, &sbuf) < 0) {
     clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file");
@@ -111,14 +113,9 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
 void read_requesthdrs(rio_t *rp)
 {
   char buf[MAXLINE];
-
   while(1) {
     Rio_readlineb(rp, buf, MAXLINE);
-    // strcmp -> str(a, b) 1. 문자열 a, b 가 같음 -> 0 반환 | 2. a가 사전상 더 빠름 -> 음수 | 3. a가 사전상 더 느림 -> 양수 
-    // while (strcmp(buf, "\r\n"))는 "buf와 \r\n이 다를 동안 계속 반복해라"라는 뜻.
-    if (strcmp(buf, "\r\n") == 0) {
-      break;
-    }
+    if(strcmp(buf, "\r\n") == 0) break;
   }
   return;
 }
@@ -155,9 +152,10 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
       *ptr = '\0';
     }
     // 문자열 안에 ? 가 없다면
-    else 
-    // 인자 들어올 버퍼 초기화
-    strcpy(cgiargs, "");
+    else {
+	     // 인자 들어올 버퍼 초기화 
+	     strcpy(cgiargs, "");
+	   }
     // filename 에 . 복사 -> filname = '.'
     strcpy(filename, ".");
     // filename 뒤에 uri 붙여 넣어 -> filename (예시로 -> ./cgi-bin/adder)
@@ -166,23 +164,21 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
   }
 }
 
-// get_filetype - 파일 이름에서 MIME 타입 결정
 void get_filetype(char *filename, char *filetype)
 {
   if(strstr(filename, ".html")) strcpy(filetype, "text/html");
-  else if(strstr(filename, ".gif")) strcpy(filetype, "image/gif");
   else if(strstr(filename, ".png")) strcpy(filetype, "image/png");
+  else if(strstr(filename, ".gif")) strcpy(filetype, "image/gif");
   else if(strstr(filename, ".jpg")) strcpy(filetype, "image/jpeg");
   else strcpy(filetype, "text/plain");
 }
 
-// serve_static : 정적 컨텐츠 전송 -> 클라이언트에게로?
-void serve_static(int fd, char *filename, int filesize) 
+void serve_static(int fd, char *filename, int filesize)
 {
   int srcfd;
   char *srcp, filetype[MAXLINE], buf[MAXBUF];
-
   get_filetype(filename, filetype);
+  // send header
   sprintf(buf, "HTTP/1.0 200 OK\r\n");
   sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
   sprintf(buf, "%sConnection: close\r\n", buf);
@@ -191,7 +187,7 @@ void serve_static(int fd, char *filename, int filesize)
   Rio_writen(fd, buf, strlen(buf));
   printf("Response headers:\n");
   printf("%s", buf);
-
+  // send body
   srcfd = Open(filename, O_RDONLY, 0);
   srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
   Close(srcfd);
@@ -199,19 +195,22 @@ void serve_static(int fd, char *filename, int filesize)
   Munmap(srcp, filesize);
 }
 
-void serve_dynamic(int fd, char *filename, char *cgiargs) 
+void serve_dynamic(int fd, char *filename, char *cgiargs)
 {
   char buf[MAXLINE], *emptylist[] = { NULL };
 
   sprintf(buf, "HTTP/1.0 200 OK\r\n");
   Rio_writen(fd, buf, strlen(buf));
-  sprintf(buf, "Server : Tiny Web Server\r\n");
+  sprintf(buf, "Server: Tiny Web Server\r\n");
   Rio_writen(fd, buf, strlen(buf));
 
-  if(Fork() == 0) {
+  if (Fork() == 0) {
     setenv("QUERY_STRING", cgiargs, 1);
     Dup2(fd, STDOUT_FILENO);
     Execve(filename, emptylist, environ);
   }
-  Wait(NULL);
+
+  // 여기 수정: 자식 종료 대기 비차단 버전
+  while (waitpid(-1, NULL, WNOHANG) > 0);
 }
+

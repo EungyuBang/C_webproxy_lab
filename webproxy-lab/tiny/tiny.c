@@ -54,6 +54,7 @@ void doit(int fd)
 
   Rio_readinitb(&rio, fd);
   Rio_readlineb(&rio, buf, MAXLINE);
+  printf("Request line: %s\n", buf);
   sscanf(buf, "%s %s %s", method, uri, version);  
   if(strcasecmp(method, "GET")) {
     clienterror(fd, method, "501", "Not Implemented", "Tiny does bot implement this method");
