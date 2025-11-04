@@ -43,50 +43,50 @@ int main(int argc, char **argv)
     Close(connfd); // line:netp:tiny:close
   }
 }
-
-void doit(int fd) 
-{
+// 우선 구조체 만들고 버퍼 만들어서, GET 요청 확인 뒤 -> 버퍼에서 요청 라인 읽어서 빈 파일이냐? 확인 후 -> parse 해줘야 함. -> 정적이냐? (파일이 맞냐? | 읽기 전용이냐?)  | 동적이냐 ? -> (파일이 맞냐? | 실행 가능하냐?)  
+// static_serve, dynamic_serve 연결 해줘야 하고, 
+void doit(int fd) {
   int is_static;
   rio_t rio;
   struct stat sbuf;
   char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
   char filename[MAXLINE], cgiargs[MAXLINE];
 
+  // 초기화 하고 연결해
   Rio_readinitb(&rio, fd);
+  // 연결 라인 읽어
   Rio_readlineb(&rio, buf, MAXLINE);
-  printf("Request line: %s\n", buf);
-  sscanf(buf, "%s %s %s", method, uri, version);  
+  // 버퍼에 담아
+  sscanf(buf, "%s %s %s", method, uri, version);
+
   if(strcasecmp(method, "GET")) {
     clienterror(fd, method, "501", "Not Implemented", "Tiny does bot implement this method");
-    return;
+    return; 
   }
   read_requesthdrs(&rio);
 
   is_static = parse_uri(uri, filename, cgiargs);
-  printf("==> Requested filename: %s\n", filename);
-  // 파일이 존재하지 않으면 
+
   if(stat(filename, &sbuf) < 0) {
     clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file");
     return;
   }
-  // 정적 파일이라면 
+  // is_static -> 정적일때 1 반환, 동적일때 0 반환
   if(is_static) {
-    // 일반 파일이 아니거나, 읽기 권한이 없으면
-    if(!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+    // 정적일때 -> 우선 검사해줘야됨
+    if(!S_ISREG(sbuf.st_mode) || !(S_IRUSR & sbuf.st_mode)) {
       clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read this file");
       return;
     }
-    // 모든 경우 통과 -> 정적 컨텐츠를 클라이언트에게 전송
     serve_static(fd, filename, sbuf.st_size);
-  }
-  // 동적 컨텐츠
+  } 
+  // 동적 일때 -> 검사 필요
   else {
-    // 일반 파일이 아니거나, 실행 권한이 없으면 
-    if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
+    if(!S_ISREG(sbuf.st_mode) || !(S_IXUSR & sbuf.st_mode)) {
       clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
       return;
     }
-    serve_dynamic(fd, filename, cgiargs);
+    serve_dynamic(fd, filename, sbuf.st_size);
   }
 }
 
@@ -110,59 +110,46 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   Rio_writen(fd, body, strlen(body));
 }
 
-void read_requesthdrs(rio_t *rp)
+
+void read_requesthdrs(rio_t *rp) 
 {
   char buf[MAXLINE];
   while(1) {
     Rio_readlineb(rp, buf, MAXLINE);
-    if(strcmp(buf, "\r\n") == 0) break;
+    if(strcmp(buf, "\r\n") == 0) {
+      break;
+    }
   }
   return;
 }
 
-int parse_uri(char *uri, char *filename, char *cgiargs)
+// uri 정적/ 동적인지 나눠야함
+int parse_uri(char *uri, char *filename, char *cgiargs) 
 {
   char *ptr;
-  /*
-    strstr -> string in string -> strstr 함수는 true/false 반환 안 함.
-    찾았을때 -> strstr("/cgi-bin/adder", "cgi-bin")를 실행하면, / 다음의 'c'를 가리키는 포인터를 반환.
-    못 찾았을때(없을때) -> NULL 포인터 (즉, 0)를 반환.
-  */  
-  // uri 문자열 안에 cgi-bin이 없다면 ? -> 정적
+  // uri에 cgi-bin 이 없어? -> 정적 /home.html
   if(!strstr(uri, "cgi-bin")) {
-    // strcpy -> 덮어쓰기 -> char *strcpy(char *dest, const char *src);
-    //                     dest (Destination, 목적지): 복사한 문자열이 저장될 버퍼(문자 배열).
-    //                     src (Source, 원본): 복사할 원본 문자열.
     strcpy(cgiargs, "");
     strcpy(filename, ".");
-    // strcat -> 이어쓰기
     strcat(filename, uri);
-    // 요청된 uri의 끝이 / 이면 -> http://localhost:8000/ 이런식으로 디렉토리를 요청한 것 -> 기본 파일 제공
-    if(uri[strlen(uri)-1] == '/') strcat(filename, "home.html");
-    return -1;
+    if(uri[strlen(uri) -1 ] == '/') strcat(filename, "home.html");
+    return 1;
   }
-  // uri 문자열 안에 cgi-bin이 있다면 ? -> 동적
+  // 동적
   else {
-    // 우선 ? 기준 잡아 -> ? 앞으론 filename, 뒤론 전달할 cgiargs (인자)
     ptr = index(uri, '?');
-    if(ptr) {
-      // ? 바로 다음 위치부터 문자열 끝까지 cgiargs 버퍼에 복사 (? 바로 다음 위치부터 인자니까)
+    if(ptr) {                  // '?' 있으면 /cgi-bin?15000&213
       strcpy(cgiargs, ptr + 1);
-      // 그리고 물음표 \0 -> NULL 로 바꿔버림 (이제 \0 기준으로 앞은 filename 뒤론 인자)
-      *ptr = '\0';
+      *ptr = '\0';           
+    } else {                 // '?' 없으면
+        strcpy(cgiargs, "");
     }
-    // 문자열 안에 ? 가 없다면
-    else {
-	     // 인자 들어올 버퍼 초기화 
-	     strcpy(cgiargs, "");
-	   }
-    // filename 에 . 복사 -> filname = '.'
     strcpy(filename, ".");
-    // filename 뒤에 uri 붙여 넣어 -> filename (예시로 -> ./cgi-bin/adder)
     strcat(filename, uri);
     return 0;
   }
 }
+
 
 void get_filetype(char *filename, char *filetype)
 {
@@ -173,7 +160,8 @@ void get_filetype(char *filename, char *filetype)
   else strcpy(filetype, "text/plain");
 }
 
-void serve_static(int fd, char *filename, int filesize)
+// 정적 보내줘야됨
+void serve_static(int fd, char *filename, int filesize) 
 {
   int srcfd;
   char *srcp, filetype[MAXLINE], buf[MAXBUF];
@@ -186,17 +174,17 @@ void serve_static(int fd, char *filename, int filesize)
   sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
   Rio_writen(fd, buf, strlen(buf));
   printf("Response headers:\n");
-  printf("%s", buf); 
-  // send body
+  printf("%s", buf);
+
   srcfd = Open(filename, O_RDONLY, 0);
   srcp = (char *)malloc(filesize);
   Rio_readn(srcfd, srcp, filesize);
-  // 여기 왜 close 해도 됨? , 파일 테이블? v node 테이블?
   Close(srcfd);
   Rio_writen(fd, srcp, filesize);
   free(srcp);
 }
 
+// 동적 보내줘야 됨
 void serve_dynamic(int fd, char *filename, char *cgiargs)
 {
   char buf[MAXLINE], *emptylist[] = { NULL };
@@ -215,4 +203,3 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
   // 여기 수정: 자식 종료 대기 비차단 버전
   while (waitpid(-1, NULL, WNOHANG) > 0);
 }
-

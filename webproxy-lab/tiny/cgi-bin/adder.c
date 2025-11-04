@@ -40,7 +40,7 @@ int main(void)
                 n1, n2, n1 + n2);
         sprintf(content + strlen(content), "Thanks for visiting!\r\n");
 
-        /* Generate the HTTP response */
+        /* Generate the HTTP response -> 자식 책임 */ 
         printf("Content-type: text/html\r\n");
         printf("Content-length: %d\r\n", (int)strlen(content));
         printf("\r\n");
