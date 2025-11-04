@@ -197,8 +197,5 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
     Dup2(fd, STDOUT_FILENO);
     Execve(filename, emptylist, environ);
   }
-
-  // 🔥 여기 수정: 자식 종료 대기 비차단 버전
-  while (waitpid(-1, NULL, WNOHANG) > 0);
+  Wait(NULL);
 }
-
