@@ -191,7 +191,6 @@ void serve_static(int fd, char *filename, int filesize)
   srcfd = Open(filename, O_RDONLY, 0);
   srcp = (char *)malloc(filesize);
   Rio_readn(srcfd, srcp, filesize);
-  // 여기 왜 close 해도 됨? , 파일 테이블? v node 테이블?
   Close(srcfd);
   Rio_writen(fd, srcp, filesize);
   free(srcp);
