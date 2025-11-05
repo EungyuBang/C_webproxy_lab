@@ -126,36 +126,48 @@ void read_requesthdrs(rio_t *rp, char *request_buf, char *hostname)
   return;
 }
 
-// uri 짜르는 부분
+// uri 짜르는 부분 -> uri 기본형 (hostname, port, path 다 있는 경우로 우선 생각)
+// http://localhost:80/index.html
 int parse_uri(char *uri, char *hostname, char *port, char *path) 
 {
   char *host_ptr, *port_ptr, *path_ptr;
-  // uri
+  // uri에 http:// 없어? -> 종료
   if (strncasecmp(uri, "http://", 7) != 0) {
     return -1;
   }
-
+  // host_ptr -> localhost:80/index.html
   host_ptr = uri + 7;
+  // path_ptr -> host_ptr 안에서 / 가 처음 나오는 곳 -> /index.html
   path_ptr = strchr(host_ptr, '/');
 
+  // path_ptr == NULL -> localhost:80 까지만 있다는거임 
   if (path_ptr == NULL) {
+    // path에 기본 / 담고
     strcpy(path, "/");
+    // / 있다면
   } else {
+    // path 에다가 /index.html 다 담아 (/ 부터 / 뒤로 다)
     strcpy(path, path_ptr);
+    // 이후에 NULL 로 바꿔버림 -> 그럼 현재 예시는 localhost:80\0index.html
     *path_ptr = '\0';
   }
-
+  // host_ptr = localhost:80/index,html -> port_ptr -> host_ptr 에서 처음으로 : 나온곳 -> :80/index.html 인데 위에서 :80\0index.html 됐음
   port_ptr = strchr(host_ptr, ':');
+  // port_ptr == NULL  -> : 가 없다는 거임 -> 기본 port -> localhost/index.html 
   if (port_ptr == NULL) {
+    // port에 기본 포트 번호 80 담아
     strcpy(port, "80");
-    *host_ptr = '\0';
+    // 이후에 hostname에 host_ptr 뒤로 담아 -> 이 if문애 걸릴때 uri 는 localhost\0index.html 아니면 localhost 이 상태기 떄문에 hostname만 잘 들어온다  
     strcpy(hostname, host_ptr);
   } else {
+    // 그게 아니야 : 있어 -> 그러면 localhost:80\0index.html 이 상태를 -> localhost\080\0index.html 됨
     *port_ptr = '\0';
+    // hostname에 NULL 전까지 localhost 가 hostname에 들어감
     strcpy(hostname, host_ptr);
+    // localhost\080\0index.html 지금 prot_ptr 은 첫번쨰 NULL \0 가리키고 있음 -> ptr+1 -> 8 부터 2번째 NULL 까지 port에 넣어 -> 80 들어감 
     strcpy(port, port_ptr + 1);
   }
-
+  // 이후에 원복
   if (path_ptr) *path_ptr = '/';
   if (port_ptr) *port_ptr = ':';
   return 0;
